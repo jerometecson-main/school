@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET(req: NextRequest) {
   const subjectId = req.nextUrl.searchParams.get("subjectId");
   const detailPath = req.nextUrl.searchParams.get("detailPath");
+  const season = req.nextUrl.searchParams.get("se") || "0";
+  const episode = req.nextUrl.searchParams.get("ep") || "0";
   const type = req.nextUrl.searchParams.get("type");
 
   if (!subjectId || !detailPath) {
@@ -46,7 +48,7 @@ export async function GET(req: NextRequest) {
 
   const source = sources[Math.floor(Math.random() * sources.length)];
 
-  const url = `https://${source.host}/wefeed-h5api-bff/subject/play?subjectId=${subjectId}&se=0&ep=0&detailPath=${detailPath}`;
+  const url = `https://${source.host}/wefeed-h5api-bff/subject/play?subjectId=${subjectId}&se=${season}&ep=${episode}&detailPath=${detailPath}`;
 
   const response = await fetch(url, {
     headers: {
