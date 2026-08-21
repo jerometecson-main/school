@@ -44,6 +44,31 @@ export async function GET(req: NextRequest) {
       host: "themoviebox.org",
       referer: `https://themoviebox.org/movies/${detailPath}?id=${subjectId}&type=/movie/detail&detailSe=&detailEp=&lang=en`,
     },
+    {
+      name: "movebox",
+      host: "movebox.run",
+      referer: `https://movebox.run/movies/${detailPath}?id=${subjectId}&type=/movie/detail&detailSe=&detailEp=&lang=en`,
+    },
+    {
+      name: "m2box",
+      host: "m2box.org",
+      referer: `https://m2box.org/movies/${detailPath}?id=${subjectId}&type=/movie/detail&detailSe=&detailEp=&lang=en`,
+    },
+    {
+      name: "movieboc",
+      host: "movieboc.com",
+      referer: `https://movieboc.com/movies/${detailPath}?id=${subjectId}&type=/movie/detail&detailSe=&detailEp=&lang=en`,
+    },
+    {
+      name: "moviebix",
+      host: "moviebix.org",
+      referer: `https://moviebix.org/moviesPage/${detailPath}?id=${subjectId}&type=/movie/detail&detailSe=&detailEp=&lang=en`,
+    },
+    {
+      name: "movibox",
+      host: "movibox.xyz",
+      referer: `https://movibox.xyz/watch/${detailPath}`,
+    },
   ];
 
   const source = sources[Math.floor(Math.random() * sources.length)];
