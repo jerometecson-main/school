@@ -4,14 +4,12 @@ export const runtime = "nodejs";
 
 const SEGMENT_PROXY = "https://segment.expired1.workers.dev/?url=";
 
-const GOOD_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.114 Safari/537.36",
-  Origin: "https://goodstream.cc",
-};
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.114 Safari/537.36";
 
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
+  const referer = req.nextUrl.searchParams.get("referer");
 
   if (!url) {
     return new Response("Missing url", { status: 400 });
@@ -27,29 +25,30 @@ export async function GET(req: NextRequest) {
       return new Response("Invalid URL", { status: 403 });
     }
 
-    const parts = target.pathname.split("/");
-    const embedId = parts[2];
+    let refererUrl = "https://goodstream.cc/";
 
-    if (!embedId) {
-      return new Response("Missing embed ID", { status: 400 });
-    }
+    if (referer) {
+      const parsedReferer = new URL(referer);
 
-    const e = target.searchParams.get("e");
+      if (
+        parsedReferer.hostname !== "goodstream.cc" ||
+        !parsedReferer.pathname.startsWith("/embed/")
+      ) {
+        return new Response("Invalid referer", { status: 403 });
+      }
 
-    const refererUrl = new URL(`https://goodstream.cc/embed/${embedId}`);
-
-    if (e) {
-      refererUrl.searchParams.set("e", e);
+      refererUrl = parsedReferer.toString();
     }
 
     console.log("[goodstream] target:", target.toString());
-    console.log("[goodstream] referer:", refererUrl.toString());
+    console.log("[goodstream] referer:", refererUrl);
 
     const response = await fetch(target, {
       headers: {
-        ...GOOD_HEADERS,
         Accept: "*/*",
-        Referer: refererUrl.toString(),
+        Origin: "https://goodstream.cc",
+        Referer: refererUrl,
+        "User-Agent": USER_AGENT,
       },
       cache: "no-store",
     });
@@ -67,8 +66,6 @@ export async function GET(req: NextRequest) {
     }
 
     const playlist = await response.text();
-
-    console.log("[goodstream] playlist:", playlist.slice(0, 100));
 
     if (!playlist.trimStart().startsWith("#EXTM3U")) {
       return new Response("Invalid playlist", { status: 415 });
@@ -97,8 +94,6 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error("[goodstream] error:", error);
 
-    return new Response("Proxy error", {
-      status: 500,
-    });
+    return new Response("Proxy error", { status: 500 });
   }
 }
