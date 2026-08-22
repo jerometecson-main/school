@@ -7,13 +7,23 @@ export async function GET(req: NextRequest) {
   const episode = req.nextUrl.searchParams.get("ep") || "0";
   const type = req.nextUrl.searchParams.get("type");
 
+  const streamSignType = req.nextUrl.searchParams.get("streamSignType");
   if (!subjectId || !detailPath) {
     return NextResponse.json(
       { error: "subjectId and detailPath are required" },
       { status: 400 },
     );
   }
-
+  if (
+    streamSignType !== null &&
+    streamSignType !== "0" &&
+    streamSignType !== "1"
+  ) {
+    return NextResponse.json(
+      { error: "streamSignType must be 0 or 1" },
+      { status: 400 },
+    );
+  }
   const userAgents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
@@ -99,7 +109,18 @@ export async function GET(req: NextRequest) {
 
   const source = sources[Math.floor(Math.random() * sources.length)];
 
-  const url = `https://${source.host}/wefeed-h5api-bff/subject/play?subjectId=${subjectId}&se=${season}&ep=${episode}&detailPath=${detailPath}`;
+  const params = new URLSearchParams({
+    subjectId,
+    se: season,
+    ep: episode,
+    detailPath,
+  });
+
+  if (streamSignType) {
+    params.set("streamSignType", streamSignType);
+  }
+
+  const url = `https://${source.host}/wefeed-h5api-bff/subject/play?${params.toString()}`;
 
   const response = await fetch(url, {
     headers: {
