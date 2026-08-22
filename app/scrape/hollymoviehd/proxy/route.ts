@@ -18,14 +18,10 @@ const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.114 Safari/537.36";
 
 // Global Goodstream cooldown.
-// Any request that needs Goodstream during this period immediately gets 429.
+// Requests during this period immediately receive 429.
 let goodstreamCooldownUntil = 0;
 
 const GOODSTREAM_COOLDOWN = 10_000;
-
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-};
 
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
@@ -33,7 +29,6 @@ export async function GET(req: NextRequest) {
   if (!url) {
     return new Response("Missing url", {
       status: 400,
-      headers: CORS_HEADERS,
     });
   }
 
@@ -46,7 +41,6 @@ export async function GET(req: NextRequest) {
     ) {
       return new Response("Invalid URL", {
         status: 403,
-        headers: CORS_HEADERS,
       });
     }
 
@@ -56,7 +50,6 @@ export async function GET(req: NextRequest) {
     if (!embedId) {
       return new Response("Missing embed ID", {
         status: 400,
-        headers: CORS_HEADERS,
       });
     }
 
@@ -104,10 +97,6 @@ export async function GET(req: NextRequest) {
       if (Date.now() < goodstreamCooldownUntil) {
         return new Response("Goodstream rate limited", {
           status: 429,
-          headers: {
-            ...CORS_HEADERS,
-            "Retry-After": "10",
-          },
         });
       }
 
@@ -115,8 +104,10 @@ export async function GET(req: NextRequest) {
 
       /*
        * --------------------------------------------------
-       * CURL
+       * FETCH USING CURL
        * --------------------------------------------------
+       *
+       * -w appends the HTTP status after the body.
        */
 
       let stdout: string;
@@ -147,8 +138,11 @@ export async function GET(req: NextRequest) {
         stdout = result.stdout;
       } catch (error: any) {
         /*
-         * curl can still provide stdout even when the
-         * process exits with an error.
+         * curl itself failed.
+         *
+         * If curl exited because of an HTTP error, stdout
+         * can still contain the response depending on curl
+         * options/version, so handle it below when possible.
          */
 
         const output = error?.stdout || "";
@@ -165,16 +159,11 @@ export async function GET(req: NextRequest) {
 
             return new Response("Goodstream rate limited", {
               status: 429,
-              headers: {
-                ...CORS_HEADERS,
-                "Retry-After": "10",
-              },
             });
           }
 
           return new Response(`Upstream error: ${status}`, {
             status,
-            headers: CORS_HEADERS,
           });
         }
 
@@ -182,7 +171,6 @@ export async function GET(req: NextRequest) {
 
         return new Response("Upstream connection error", {
           status: 502,
-          headers: CORS_HEADERS,
         });
       }
 
@@ -197,7 +185,6 @@ export async function GET(req: NextRequest) {
       if (!statusMatch) {
         return new Response("Invalid upstream response", {
           status: 502,
-          headers: CORS_HEADERS,
         });
       }
 
@@ -208,9 +195,7 @@ export async function GET(req: NextRequest) {
       playlist = markerIndex === -1 ? stdout : stdout.slice(0, markerIndex);
 
       /*
-       * --------------------------------------------------
-       * 429 DETECTOR
-       * --------------------------------------------------
+       * Goodstream rate limit.
        */
 
       if (upstreamStatus === 429) {
@@ -220,23 +205,12 @@ export async function GET(req: NextRequest) {
 
         return new Response("Goodstream rate limited", {
           status: 429,
-          headers: {
-            ...CORS_HEADERS,
-            "Retry-After": "10",
-          },
         });
       }
-
-      /*
-       * --------------------------------------------------
-       * OTHER UPSTREAM ERRORS
-       * --------------------------------------------------
-       */
 
       if (upstreamStatus < 200 || upstreamStatus >= 300) {
         return new Response(`Upstream error: ${upstreamStatus}`, {
           status: upstreamStatus,
-          headers: CORS_HEADERS,
         });
       }
 
@@ -249,7 +223,6 @@ export async function GET(req: NextRequest) {
       if (!playlist.trimStart().startsWith("#EXTM3U")) {
         return new Response("Invalid playlist", {
           status: 415,
-          headers: CORS_HEADERS,
         });
       }
 
@@ -306,18 +279,12 @@ export async function GET(req: NextRequest) {
       })
       .join("\n");
 
-    /*
-     * --------------------------------------------------
-     * RETURN PLAYLIST
-     * --------------------------------------------------
-     */
-
     return new Response(rewritten, {
       status: 200,
       headers: {
-        ...CORS_HEADERS,
         "Content-Type": "application/vnd.apple.mpegurl",
         "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
       },
     });
   } catch (error) {
@@ -325,7 +292,6 @@ export async function GET(req: NextRequest) {
 
     return new Response("Proxy error", {
       status: 500,
-      headers: CORS_HEADERS,
     });
   }
 }
