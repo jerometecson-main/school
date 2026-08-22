@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.HOLLY_SUPABASE_SERVICE_ROLE_KEY_HOLLY!,
 );
 
-const domain = "https://your-domain.com";
+const domain = "https://main-school-project-production.up.railway.app";
 
 export async function GET(req: NextRequest) {
   const tmdbId = req.nextUrl.searchParams.get("id");
