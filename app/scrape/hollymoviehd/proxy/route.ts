@@ -27,7 +27,6 @@ export async function GET(req: NextRequest) {
       return new Response("Invalid URL", { status: 403 });
     }
 
-    // /pl/WUmU1cMmqA6Hc61/0-27
     const parts = target.pathname.split("/");
     const embedId = parts[2];
 
@@ -35,27 +34,31 @@ export async function GET(req: NextRequest) {
       return new Response("Missing embed ID", { status: 400 });
     }
 
-    // Get the e parameter from the playlist URL
     const e = target.searchParams.get("e");
 
-    // Dynamically create the Referer
     const refererUrl = new URL(`https://goodstream.cc/embed/${embedId}`);
 
     if (e) {
       refererUrl.searchParams.set("e", e);
     }
 
+    console.log("[goodstream] target:", target.toString());
+    console.log("[goodstream] referer:", refererUrl.toString());
+
     const response = await fetch(target, {
-      method: "GET",
       headers: {
+        ...GOOD_HEADERS,
         Accept: "*/*",
-        Origin: "https://goodstream.cc",
         Referer: refererUrl.toString(),
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.114 Safari/537.36",
       },
       cache: "no-store",
     });
+
+    console.log(
+      "[goodstream] upstream:",
+      response.status,
+      response.headers.get("content-type"),
+    );
 
     if (!response.ok) {
       return new Response(`Upstream error: ${response.status}`, {
@@ -65,10 +68,10 @@ export async function GET(req: NextRequest) {
 
     const playlist = await response.text();
 
+    console.log("[goodstream] playlist:", playlist.slice(0, 100));
+
     if (!playlist.trimStart().startsWith("#EXTM3U")) {
-      return new Response("Invalid playlist", {
-        status: 415,
-      });
+      return new Response("Invalid playlist", { status: 415 });
     }
 
     const rewritten = playlist
@@ -76,42 +79,26 @@ export async function GET(req: NextRequest) {
       .map((line) => {
         const value = line.trim();
 
-        // Keep empty lines and HLS directives unchanged
         if (!value || value.startsWith("#")) {
           return line;
         }
 
-        // Proxy every URL in the playlist
         return SEGMENT_PROXY + encodeURIComponent(value);
       })
       .join("\n");
 
     return new Response(rewritten, {
-      status: 200,
       headers: {
         "Content-Type": "application/vnd.apple.mpegurl",
-        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Cache-Control": "no-store",
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
-        "Access-Control-Allow-Headers": "*",
       },
     });
   } catch (error) {
-    console.error("Goodstream proxy error:", error);
+    console.error("[goodstream] error:", error);
 
     return new Response("Proxy error", {
       status: 500,
     });
   }
-}
-
-export async function OPTIONS() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "*",
-    },
-  });
 }
