@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
       .map((source: any) => ({
         source: "pl",
         type: "hls",
-        link: `${domain}/scrape/hollymoviehd/proxy/?url=${encodeURIComponent(
+        link: `${domain}/scrape/hollymoviehd/proxy?url=${encodeURIComponent(
           source.file,
         )}`,
       }));
