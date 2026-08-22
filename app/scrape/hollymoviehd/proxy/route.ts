@@ -1,4 +1,5 @@
 //with 429 detector
+
 import { NextRequest } from "next/server";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -17,11 +18,18 @@ const SEGMENT_PROXY = "https://segment.expired1.workers.dev/?url=";
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.114 Safari/537.36";
 
-// Global Goodstream cooldown.
-// Requests during this period immediately receive 429.
+// Goodstream cooldown.
+// Cached playlists are still served during cooldown.
 let goodstreamCooldownUntil = 0;
 
 const GOODSTREAM_COOLDOWN = 10_000;
+
+// Prevent multiple uncached requests from hitting Goodstream at once.
+let goodstreamRequestInProgress = false;
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+};
 
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
@@ -29,6 +37,7 @@ export async function GET(req: NextRequest) {
   if (!url) {
     return new Response("Missing url", {
       status: 400,
+      headers: CORS_HEADERS,
     });
   }
 
@@ -41,6 +50,7 @@ export async function GET(req: NextRequest) {
     ) {
       return new Response("Invalid URL", {
         status: 403,
+        headers: CORS_HEADERS,
       });
     }
 
@@ -50,6 +60,7 @@ export async function GET(req: NextRequest) {
     if (!embedId) {
       return new Response("Missing embed ID", {
         status: 400,
+        headers: CORS_HEADERS,
       });
     }
 
@@ -75,7 +86,7 @@ export async function GET(req: NextRequest) {
 
     /*
      * --------------------------------------------------
-     * CACHE
+     * CACHE FIRST
      * --------------------------------------------------
      */
 
@@ -86,155 +97,197 @@ export async function GET(req: NextRequest) {
         throw new Error("Invalid cached playlist");
       }
 
+      // IMPORTANT:
+      // Cache is served even when Goodstream is on cooldown.
       console.log("[goodstream] cache hit:", embedId);
     } catch {
       /*
        * --------------------------------------------------
-       * GLOBAL 429 COOLDOWN
+       * NO CACHE
        * --------------------------------------------------
        */
 
+      // Goodstream is currently rate limited.
+      // Immediately reject uncached requests.
       if (Date.now() < goodstreamCooldownUntil) {
+        console.log("[goodstream] cooldown 429:", embedId);
+
         return new Response("Goodstream rate limited", {
           status: 429,
+          headers: {
+            ...CORS_HEADERS,
+            "Retry-After": "10",
+          },
         });
       }
+
+      // Another uncached request is already contacting Goodstream.
+      // Do not queue this request.
+      if (goodstreamRequestInProgress) {
+        console.log("[goodstream] request busy 429:", embedId);
+
+        return new Response("Goodstream busy", {
+          status: 429,
+          headers: {
+            ...CORS_HEADERS,
+            "Retry-After": "10",
+          },
+        });
+      }
+
+      goodstreamRequestInProgress = true;
 
       console.log("[goodstream] cache miss:", embedId);
 
-      /*
-       * --------------------------------------------------
-       * FETCH USING CURL
-       * --------------------------------------------------
-       *
-       * -w appends the HTTP status after the body.
-       */
-
-      let stdout: string;
-
       try {
-        const result = await execFileAsync("curl", [
-          "-sS",
-          "--compressed",
-
-          target.toString(),
-
-          "-H",
-          "Accept: */*",
-
-          "-H",
-          "Origin: https://goodstream.cc",
-
-          "-H",
-          `Referer: ${refererUrl.toString()}`,
-
-          "-H",
-          `User-Agent: ${USER_AGENT}`,
-
-          "-w",
-          "\n__HTTP_STATUS__:%{http_code}",
-        ]);
-
-        stdout = result.stdout;
-      } catch (error: any) {
         /*
-         * curl itself failed.
-         *
-         * If curl exited because of an HTTP error, stdout
-         * can still contain the response depending on curl
-         * options/version, so handle it below when possible.
+         * --------------------------------------------------
+         * FETCH GOODSTREAM
+         * --------------------------------------------------
          */
 
-        const output = error?.stdout || "";
+        let stdout: string;
 
-        const statusMatch = output.match(/__HTTP_STATUS__:(\d{3})\s*$/);
+        try {
+          const result = await execFileAsync("curl", [
+            "-sS",
+            "--compressed",
 
-        if (statusMatch) {
-          const status = Number(statusMatch[1]);
+            target.toString(),
 
-          if (status === 429) {
-            goodstreamCooldownUntil = Date.now() + GOODSTREAM_COOLDOWN;
+            "-H",
+            "Accept: */*",
 
-            console.log("[goodstream] 429 cooldown started");
+            "-H",
+            "Origin: https://goodstream.cc",
 
-            return new Response("Goodstream rate limited", {
-              status: 429,
+            "-H",
+            `Referer: ${refererUrl.toString()}`,
+
+            "-H",
+            `User-Agent: ${USER_AGENT}`,
+
+            "-w",
+            "\n__HTTP_STATUS__:%{http_code}",
+          ]);
+
+          stdout = result.stdout;
+        } catch (error: any) {
+          const output = error?.stdout || "";
+
+          const statusMatch = output.match(/__HTTP_STATUS__:(\d{3})\s*$/);
+
+          if (statusMatch) {
+            const status = Number(statusMatch[1]);
+
+            if (status === 429) {
+              goodstreamCooldownUntil = Date.now() + GOODSTREAM_COOLDOWN;
+
+              console.log("[goodstream] 429 cooldown started");
+
+              return new Response("Goodstream rate limited", {
+                status: 429,
+                headers: {
+                  ...CORS_HEADERS,
+                  "Retry-After": "10",
+                },
+              });
+            }
+
+            return new Response(`Upstream error: ${status}`, {
+              status,
+              headers: CORS_HEADERS,
             });
           }
 
-          return new Response(`Upstream error: ${status}`, {
-            status,
+          console.error("[goodstream] curl error:", error);
+
+          return new Response("Upstream connection error", {
+            status: 502,
+            headers: CORS_HEADERS,
           });
         }
 
-        console.error("[goodstream] curl error:", error);
+        /*
+         * --------------------------------------------------
+         * READ HTTP STATUS
+         * --------------------------------------------------
+         */
 
-        return new Response("Upstream connection error", {
-          status: 502,
-        });
+        const statusMatch = stdout.match(/__HTTP_STATUS__:(\d{3})\s*$/);
+
+        if (!statusMatch) {
+          return new Response("Invalid upstream response", {
+            status: 502,
+            headers: CORS_HEADERS,
+          });
+        }
+
+        const upstreamStatus = Number(statusMatch[1]);
+
+        const markerIndex = stdout.lastIndexOf("\n__HTTP_STATUS__:");
+
+        playlist = markerIndex === -1 ? stdout : stdout.slice(0, markerIndex);
+
+        /*
+         * --------------------------------------------------
+         * 429 DETECTOR
+         * --------------------------------------------------
+         */
+
+        if (upstreamStatus === 429) {
+          goodstreamCooldownUntil = Date.now() + GOODSTREAM_COOLDOWN;
+
+          console.log("[goodstream] 429 cooldown started");
+
+          return new Response("Goodstream rate limited", {
+            status: 429,
+            headers: {
+              ...CORS_HEADERS,
+              "Retry-After": "10",
+            },
+          });
+        }
+
+        /*
+         * --------------------------------------------------
+         * OTHER UPSTREAM ERRORS
+         * --------------------------------------------------
+         */
+
+        if (upstreamStatus < 200 || upstreamStatus >= 300) {
+          return new Response(`Upstream error: ${upstreamStatus}`, {
+            status: upstreamStatus,
+            headers: CORS_HEADERS,
+          });
+        }
+
+        /*
+         * --------------------------------------------------
+         * VALIDATE PLAYLIST
+         * --------------------------------------------------
+         */
+
+        if (!playlist.trimStart().startsWith("#EXTM3U")) {
+          return new Response("Invalid playlist", {
+            status: 415,
+            headers: CORS_HEADERS,
+          });
+        }
+
+        /*
+         * --------------------------------------------------
+         * SAVE ORIGINAL PLAYLIST
+         * --------------------------------------------------
+         */
+
+        await writeFile(cacheFile, playlist, "utf8");
+
+        console.log("[goodstream] original playlist cached:", embedId);
+      } finally {
+        // Never leave the lock stuck if curl/writeFile throws.
+        goodstreamRequestInProgress = false;
       }
-
-      /*
-       * --------------------------------------------------
-       * READ HTTP STATUS
-       * --------------------------------------------------
-       */
-
-      const statusMatch = stdout.match(/__HTTP_STATUS__:(\d{3})\s*$/);
-
-      if (!statusMatch) {
-        return new Response("Invalid upstream response", {
-          status: 502,
-        });
-      }
-
-      const upstreamStatus = Number(statusMatch[1]);
-
-      const markerIndex = stdout.lastIndexOf("\n__HTTP_STATUS__:");
-
-      playlist = markerIndex === -1 ? stdout : stdout.slice(0, markerIndex);
-
-      /*
-       * Goodstream rate limit.
-       */
-
-      if (upstreamStatus === 429) {
-        goodstreamCooldownUntil = Date.now() + GOODSTREAM_COOLDOWN;
-
-        console.log("[goodstream] 429 cooldown started");
-
-        return new Response("Goodstream rate limited", {
-          status: 429,
-        });
-      }
-
-      if (upstreamStatus < 200 || upstreamStatus >= 300) {
-        return new Response(`Upstream error: ${upstreamStatus}`, {
-          status: upstreamStatus,
-        });
-      }
-
-      /*
-       * --------------------------------------------------
-       * VALIDATE PLAYLIST
-       * --------------------------------------------------
-       */
-
-      if (!playlist.trimStart().startsWith("#EXTM3U")) {
-        return new Response("Invalid playlist", {
-          status: 415,
-        });
-      }
-
-      /*
-       * --------------------------------------------------
-       * SAVE ORIGINAL PLAYLIST
-       * --------------------------------------------------
-       */
-
-      await writeFile(cacheFile, playlist, "utf8");
-
-      console.log("[goodstream] original playlist cached:", embedId);
     }
 
     /*
@@ -279,12 +332,18 @@ export async function GET(req: NextRequest) {
       })
       .join("\n");
 
+    /*
+     * --------------------------------------------------
+     * RETURN PLAYLIST
+     * --------------------------------------------------
+     */
+
     return new Response(rewritten, {
       status: 200,
       headers: {
+        ...CORS_HEADERS,
         "Content-Type": "application/vnd.apple.mpegurl",
         "Cache-Control": "no-store",
-        "Access-Control-Allow-Origin": "*",
       },
     });
   } catch (error) {
@@ -292,6 +351,7 @@ export async function GET(req: NextRequest) {
 
     return new Response("Proxy error", {
       status: 500,
+      headers: CORS_HEADERS,
     });
   }
 }
