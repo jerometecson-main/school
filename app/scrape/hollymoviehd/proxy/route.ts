@@ -9,7 +9,6 @@ const USER_AGENT =
 
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
-  const customReferer = req.nextUrl.searchParams.get("referer");
 
   if (!url) {
     return new Response("Missing url", { status: 400 });
@@ -25,11 +24,6 @@ export async function GET(req: NextRequest) {
       return new Response("Invalid URL", { status: 403 });
     }
 
-    /*
-     * /pl/WUmU1cMmqA6Hc61/0-27
-     *       ↑
-     *       embed ID
-     */
     const parts = target.pathname.split("/");
     const embedId = parts[2];
 
@@ -37,46 +31,21 @@ export async function GET(req: NextRequest) {
       return new Response("Missing embed ID", { status: 400 });
     }
 
-    let refererUrl: string;
+    const e = target.searchParams.get("e");
 
-    /*
-     * If a referer was explicitly supplied, use it.
-     * Otherwise generate it from the /pl/ URL.
-     */
-    if (customReferer) {
-      const parsedReferer = new URL(customReferer);
+    const refererUrl = new URL(`https://goodstream.cc/embed/${embedId}`);
 
-      if (
-        parsedReferer.hostname !== "goodstream.cc" ||
-        !parsedReferer.pathname.startsWith("/embed/")
-      ) {
-        return new Response("Invalid referer", { status: 403 });
-      }
-
-      refererUrl = parsedReferer.toString();
-    } else {
-      const e = target.searchParams.get("e");
-
-      const generatedReferer = new URL(
-        `https://goodstream.cc/embed/${embedId}`,
-      );
-
-      if (e) {
-        generatedReferer.searchParams.set("e", e);
-      }
-
-      refererUrl = generatedReferer.toString();
+    if (e) {
+      refererUrl.searchParams.set("e", e);
     }
 
     console.log("[goodstream] target:", target.toString());
-    console.log("[goodstream] referer:", refererUrl);
+    console.log("[goodstream] referer:", refererUrl.toString());
 
     const response = await fetch(target, {
       method: "GET",
       headers: {
-        Accept: "*/*",
-        Origin: "https://goodstream.cc",
-        Referer: refererUrl,
+        Referer: refererUrl.toString(),
         "User-Agent": USER_AGENT,
       },
       cache: "no-store",
@@ -95,8 +64,6 @@ export async function GET(req: NextRequest) {
     }
 
     const playlist = await response.text();
-
-    console.log("[goodstream] playlist:", playlist.slice(0, 150));
 
     if (!playlist.trimStart().startsWith("#EXTM3U")) {
       return new Response("Invalid playlist", {
