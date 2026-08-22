@@ -9,7 +9,7 @@ const USER_AGENT =
 
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
-  const referer = req.nextUrl.searchParams.get("referer");
+  const customReferer = req.nextUrl.searchParams.get("referer");
 
   if (!url) {
     return new Response("Missing url", { status: 400 });
@@ -25,10 +25,26 @@ export async function GET(req: NextRequest) {
       return new Response("Invalid URL", { status: 403 });
     }
 
-    let refererUrl = "https://goodstream.cc/";
+    /*
+     * /pl/WUmU1cMmqA6Hc61/0-27
+     *       ↑
+     *       embed ID
+     */
+    const parts = target.pathname.split("/");
+    const embedId = parts[2];
 
-    if (referer) {
-      const parsedReferer = new URL(referer);
+    if (!embedId) {
+      return new Response("Missing embed ID", { status: 400 });
+    }
+
+    let refererUrl: string;
+
+    /*
+     * If a referer was explicitly supplied, use it.
+     * Otherwise generate it from the /pl/ URL.
+     */
+    if (customReferer) {
+      const parsedReferer = new URL(customReferer);
 
       if (
         parsedReferer.hostname !== "goodstream.cc" ||
@@ -38,12 +54,25 @@ export async function GET(req: NextRequest) {
       }
 
       refererUrl = parsedReferer.toString();
+    } else {
+      const e = target.searchParams.get("e");
+
+      const generatedReferer = new URL(
+        `https://goodstream.cc/embed/${embedId}`,
+      );
+
+      if (e) {
+        generatedReferer.searchParams.set("e", e);
+      }
+
+      refererUrl = generatedReferer.toString();
     }
 
     console.log("[goodstream] target:", target.toString());
     console.log("[goodstream] referer:", refererUrl);
 
     const response = await fetch(target, {
+      method: "GET",
       headers: {
         Accept: "*/*",
         Origin: "https://goodstream.cc",
@@ -67,8 +96,12 @@ export async function GET(req: NextRequest) {
 
     const playlist = await response.text();
 
+    console.log("[goodstream] playlist:", playlist.slice(0, 150));
+
     if (!playlist.trimStart().startsWith("#EXTM3U")) {
-      return new Response("Invalid playlist", { status: 415 });
+      return new Response("Invalid playlist", {
+        status: 415,
+      });
     }
 
     const rewritten = playlist
@@ -85,6 +118,7 @@ export async function GET(req: NextRequest) {
       .join("\n");
 
     return new Response(rewritten, {
+      status: 200,
       headers: {
         "Content-Type": "application/vnd.apple.mpegurl",
         "Cache-Control": "no-store",
@@ -94,6 +128,19 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error("[goodstream] error:", error);
 
-    return new Response("Proxy error", { status: 500 });
+    return new Response("Proxy error", {
+      status: 500,
+    });
   }
+}
+
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "*",
+    },
+  });
 }
