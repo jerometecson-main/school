@@ -1,6 +1,10 @@
 import { NextRequest } from "next/server";
+import { execFile } from "child_process";
+import { promisify } from "util";
 
 export const runtime = "nodejs";
+
+const execFileAsync = promisify(execFile);
 
 const SEGMENT_PROXY = "https://segment.expired1.workers.dev/?url=";
 
@@ -42,28 +46,19 @@ export async function GET(req: NextRequest) {
     console.log("[goodstream] target:", target.toString());
     console.log("[goodstream] referer:", refererUrl.toString());
 
-    const response = await fetch(target, {
-      method: "GET",
-      headers: {
-        Referer: refererUrl.toString(),
-        "User-Agent": USER_AGENT,
-      },
-      cache: "no-store",
-    });
+    const { stdout } = await execFileAsync("curl", [
+      "-sS",
+      "--compressed",
+      target.toString(),
+      "-H",
+      `Referer: ${refererUrl.toString()}`,
+      "-H",
+      `User-Agent: ${USER_AGENT}`,
+    ]);
 
-    console.log(
-      "[goodstream] upstream:",
-      response.status,
-      response.headers.get("content-type"),
-    );
+    const playlist = stdout;
 
-    if (!response.ok) {
-      return new Response(`Upstream error: ${response.status}`, {
-        status: response.status,
-      });
-    }
-
-    const playlist = await response.text();
+    console.log("[goodstream] playlist:", playlist.slice(0, 100));
 
     if (!playlist.trimStart().startsWith("#EXTM3U")) {
       return new Response("Invalid playlist", {
@@ -85,7 +80,6 @@ export async function GET(req: NextRequest) {
       .join("\n");
 
     return new Response(rewritten, {
-      status: 200,
       headers: {
         "Content-Type": "application/vnd.apple.mpegurl",
         "Cache-Control": "no-store",
@@ -99,15 +93,4 @@ export async function GET(req: NextRequest) {
       status: 500,
     });
   }
-}
-
-export async function OPTIONS() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "*",
-    },
-  });
 }
