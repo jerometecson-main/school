@@ -1,4 +1,4 @@
-//cache using storage
+//with 429 detector
 import { NextRequest } from "next/server";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -17,11 +17,19 @@ const SEGMENT_PROXY = "https://segment.expired1.workers.dev/?url=";
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.114 Safari/537.36";
 
+// Global Goodstream cooldown.
+// Requests during this period immediately receive 429.
+let goodstreamCooldownUntil = 0;
+
+const GOODSTREAM_COOLDOWN = 10_000;
+
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
 
   if (!url) {
-    return new Response("Missing url", { status: 400 });
+    return new Response("Missing url", {
+      status: 400,
+    });
   }
 
   try {
@@ -31,14 +39,18 @@ export async function GET(req: NextRequest) {
       target.hostname !== "goodstream.cc" ||
       !target.pathname.startsWith("/pl/")
     ) {
-      return new Response("Invalid URL", { status: 403 });
+      return new Response("Invalid URL", {
+        status: 403,
+      });
     }
 
     const parts = target.pathname.split("/");
     const embedId = parts[2];
 
     if (!embedId) {
-      return new Response("Missing embed ID", { status: 400 });
+      return new Response("Missing embed ID", {
+        status: 400,
+      });
     }
 
     const e = target.searchParams.get("e");
@@ -61,7 +73,12 @@ export async function GET(req: NextRequest) {
 
     let playlist: string;
 
-    // Try original playlist cache first.
+    /*
+     * --------------------------------------------------
+     * CACHE
+     * --------------------------------------------------
+     */
+
     try {
       playlist = await readFile(cacheFile, "utf8");
 
@@ -71,26 +88,137 @@ export async function GET(req: NextRequest) {
 
       console.log("[goodstream] cache hit:", embedId);
     } catch {
+      /*
+       * --------------------------------------------------
+       * GLOBAL 429 COOLDOWN
+       * --------------------------------------------------
+       */
+
+      if (Date.now() < goodstreamCooldownUntil) {
+        return new Response("Goodstream rate limited", {
+          status: 429,
+        });
+      }
+
       console.log("[goodstream] cache miss:", embedId);
 
-      console.log("[goodstream] target:", target.toString());
-      console.log("[goodstream] referer:", refererUrl.toString());
+      /*
+       * --------------------------------------------------
+       * FETCH USING CURL
+       * --------------------------------------------------
+       *
+       * -w appends the HTTP status after the body.
+       */
 
-      const { stdout } = await execFileAsync("curl", [
-        "-sS",
-        "--compressed",
-        target.toString(),
-        "-H",
-        "Accept: */*",
-        "-H",
-        "Origin: https://goodstream.cc",
-        "-H",
-        `Referer: ${refererUrl.toString()}`,
-        "-H",
-        `User-Agent: ${USER_AGENT}`,
-      ]);
+      let stdout: string;
 
-      playlist = stdout;
+      try {
+        const result = await execFileAsync("curl", [
+          "-sS",
+          "--compressed",
+
+          target.toString(),
+
+          "-H",
+          "Accept: */*",
+
+          "-H",
+          "Origin: https://goodstream.cc",
+
+          "-H",
+          `Referer: ${refererUrl.toString()}`,
+
+          "-H",
+          `User-Agent: ${USER_AGENT}`,
+
+          "-w",
+          "\n__HTTP_STATUS__:%{http_code}",
+        ]);
+
+        stdout = result.stdout;
+      } catch (error: any) {
+        /*
+         * curl itself failed.
+         *
+         * If curl exited because of an HTTP error, stdout
+         * can still contain the response depending on curl
+         * options/version, so handle it below when possible.
+         */
+
+        const output = error?.stdout || "";
+
+        const statusMatch = output.match(/__HTTP_STATUS__:(\d{3})\s*$/);
+
+        if (statusMatch) {
+          const status = Number(statusMatch[1]);
+
+          if (status === 429) {
+            goodstreamCooldownUntil = Date.now() + GOODSTREAM_COOLDOWN;
+
+            console.log("[goodstream] 429 cooldown started");
+
+            return new Response("Goodstream rate limited", {
+              status: 429,
+            });
+          }
+
+          return new Response(`Upstream error: ${status}`, {
+            status,
+          });
+        }
+
+        console.error("[goodstream] curl error:", error);
+
+        return new Response("Upstream connection error", {
+          status: 502,
+        });
+      }
+
+      /*
+       * --------------------------------------------------
+       * READ HTTP STATUS
+       * --------------------------------------------------
+       */
+
+      const statusMatch = stdout.match(/__HTTP_STATUS__:(\d{3})\s*$/);
+
+      if (!statusMatch) {
+        return new Response("Invalid upstream response", {
+          status: 502,
+        });
+      }
+
+      const upstreamStatus = Number(statusMatch[1]);
+
+      const markerIndex = stdout.lastIndexOf("\n__HTTP_STATUS__:");
+
+      playlist = markerIndex === -1 ? stdout : stdout.slice(0, markerIndex);
+
+      /*
+       * Goodstream rate limit.
+       */
+
+      if (upstreamStatus === 429) {
+        goodstreamCooldownUntil = Date.now() + GOODSTREAM_COOLDOWN;
+
+        console.log("[goodstream] 429 cooldown started");
+
+        return new Response("Goodstream rate limited", {
+          status: 429,
+        });
+      }
+
+      if (upstreamStatus < 200 || upstreamStatus >= 300) {
+        return new Response(`Upstream error: ${upstreamStatus}`, {
+          status: upstreamStatus,
+        });
+      }
+
+      /*
+       * --------------------------------------------------
+       * VALIDATE PLAYLIST
+       * --------------------------------------------------
+       */
 
       if (!playlist.trimStart().startsWith("#EXTM3U")) {
         return new Response("Invalid playlist", {
@@ -98,13 +226,23 @@ export async function GET(req: NextRequest) {
         });
       }
 
-      // Save ORIGINAL playlist before rewriting.
+      /*
+       * --------------------------------------------------
+       * SAVE ORIGINAL PLAYLIST
+       * --------------------------------------------------
+       */
+
       await writeFile(cacheFile, playlist, "utf8");
 
       console.log("[goodstream] original playlist cached:", embedId);
     }
 
-    // Rewrite only when returning the playlist.
+    /*
+     * --------------------------------------------------
+     * REWRITE PLAYLIST
+     * --------------------------------------------------
+     */
+
     const rewritten = playlist
       .split(/\r?\n/)
       .map((line) => {
@@ -122,7 +260,9 @@ export async function GET(req: NextRequest) {
           return line;
         }
 
-        // Another Goodstream playlist.
+        /*
+         * Another Goodstream playlist.
+         */
         if (
           absoluteUrl.hostname === "goodstream.cc" &&
           absoluteUrl.pathname.startsWith("/pl/")
@@ -132,7 +272,9 @@ export async function GET(req: NextRequest) {
           )}`;
         }
 
-        // Actual media segment.
+        /*
+         * Actual media segment.
+         */
         return SEGMENT_PROXY + encodeURIComponent(absoluteUrl.toString());
       })
       .join("\n");
@@ -153,6 +295,162 @@ export async function GET(req: NextRequest) {
     });
   }
 }
+
+//cache using storage
+// import { NextRequest } from "next/server";
+// import { execFile } from "child_process";
+// import { promisify } from "util";
+// import { createHash } from "crypto";
+// import { mkdir, readFile, writeFile } from "fs/promises";
+// import path from "path";
+
+// export const runtime = "nodejs";
+
+// const execFileAsync = promisify(execFile);
+
+// const CACHE_DIR = path.join(process.cwd(), "cache");
+
+// const SEGMENT_PROXY = "https://segment.expired1.workers.dev/?url=";
+
+// const USER_AGENT =
+//   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.114 Safari/537.36";
+
+// export async function GET(req: NextRequest) {
+//   const url = req.nextUrl.searchParams.get("url");
+
+//   if (!url) {
+//     return new Response("Missing url", { status: 400 });
+//   }
+
+//   try {
+//     const target = new URL(url);
+
+//     if (
+//       target.hostname !== "goodstream.cc" ||
+//       !target.pathname.startsWith("/pl/")
+//     ) {
+//       return new Response("Invalid URL", { status: 403 });
+//     }
+
+//     const parts = target.pathname.split("/");
+//     const embedId = parts[2];
+
+//     if (!embedId) {
+//       return new Response("Missing embed ID", { status: 400 });
+//     }
+
+//     const e = target.searchParams.get("e");
+
+//     const refererUrl = new URL(`https://goodstream.cc/embed/${embedId}`);
+
+//     if (e) {
+//       refererUrl.searchParams.set("e", e);
+//     }
+
+//     await mkdir(CACHE_DIR, {
+//       recursive: true,
+//     });
+
+//     const cacheKey = createHash("sha256")
+//       .update(target.toString())
+//       .digest("hex");
+
+//     const cacheFile = path.join(CACHE_DIR, `${cacheKey}.m3u8`);
+
+//     let playlist: string;
+
+//     // Try original playlist cache first.
+//     try {
+//       playlist = await readFile(cacheFile, "utf8");
+
+//       if (!playlist.trimStart().startsWith("#EXTM3U")) {
+//         throw new Error("Invalid cached playlist");
+//       }
+
+//       console.log("[goodstream] cache hit:", embedId);
+//     } catch {
+//       console.log("[goodstream] cache miss:", embedId);
+
+//       console.log("[goodstream] target:", target.toString());
+//       console.log("[goodstream] referer:", refererUrl.toString());
+
+//       const { stdout } = await execFileAsync("curl", [
+//         "-sS",
+//         "--compressed",
+//         target.toString(),
+//         "-H",
+//         "Accept: */*",
+//         "-H",
+//         "Origin: https://goodstream.cc",
+//         "-H",
+//         `Referer: ${refererUrl.toString()}`,
+//         "-H",
+//         `User-Agent: ${USER_AGENT}`,
+//       ]);
+
+//       playlist = stdout;
+
+//       if (!playlist.trimStart().startsWith("#EXTM3U")) {
+//         return new Response("Invalid playlist", {
+//           status: 415,
+//         });
+//       }
+
+//       // Save ORIGINAL playlist before rewriting.
+//       await writeFile(cacheFile, playlist, "utf8");
+
+//       console.log("[goodstream] original playlist cached:", embedId);
+//     }
+
+//     // Rewrite only when returning the playlist.
+//     const rewritten = playlist
+//       .split(/\r?\n/)
+//       .map((line) => {
+//         const value = line.trim();
+
+//         if (!value || value.startsWith("#")) {
+//           return line;
+//         }
+
+//         let absoluteUrl: URL;
+
+//         try {
+//           absoluteUrl = new URL(value, target);
+//         } catch {
+//           return line;
+//         }
+
+//         // Another Goodstream playlist.
+//         if (
+//           absoluteUrl.hostname === "goodstream.cc" &&
+//           absoluteUrl.pathname.startsWith("/pl/")
+//         ) {
+//           return `/scrape/hollymoviehd/proxy?url=${encodeURIComponent(
+//             absoluteUrl.toString(),
+//           )}`;
+//         }
+
+//         // Actual media segment.
+//         return SEGMENT_PROXY + encodeURIComponent(absoluteUrl.toString());
+//       })
+//       .join("\n");
+
+//     return new Response(rewritten, {
+//       status: 200,
+//       headers: {
+//         "Content-Type": "application/vnd.apple.mpegurl",
+//         "Cache-Control": "no-store",
+//         "Access-Control-Allow-Origin": "*",
+//       },
+//     });
+//   } catch (error) {
+//     console.error("[goodstream] error:", error);
+
+//     return new Response("Proxy error", {
+//       status: 500,
+//     });
+//   }
+// }
 
 //curl approach
 // import { NextRequest } from "next/server";
