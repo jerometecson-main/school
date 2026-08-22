@@ -75,11 +75,37 @@ export async function GET(req: NextRequest) {
           return line;
         }
 
-        return SEGMENT_PROXY + encodeURIComponent(value);
+        let absoluteUrl: URL;
+
+        try {
+          absoluteUrl = new URL(value, target);
+        } catch {
+          return line;
+        }
+
+        /*
+         * Another Goodstream playlist.
+         * Send it through this Next.js proxy again.
+         */
+        if (
+          absoluteUrl.hostname === "goodstream.cc" &&
+          absoluteUrl.pathname.startsWith("/pl/")
+        ) {
+          return `/scrape/hollymoviehd/proxy?url=${encodeURIComponent(
+            absoluteUrl.toString(),
+          )}`;
+        }
+
+        /*
+         * Actual media segment.
+         * Send it through the segment worker.
+         */
+        return SEGMENT_PROXY + encodeURIComponent(absoluteUrl.toString());
       })
       .join("\n");
 
     return new Response(rewritten, {
+      status: 200,
       headers: {
         "Content-Type": "application/vnd.apple.mpegurl",
         "Cache-Control": "no-store",
