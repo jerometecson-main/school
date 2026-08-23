@@ -28,22 +28,23 @@ function shuffle<T>(array: T[]) {
 
 async function findProxy(proxies: string[]) {
   if (!proxies.length) return null;
-  const shuffled = shuffle(proxies);
-  for (const proxy of shuffled) {
+
+  for (const proxy of shuffle(proxies)) {
     try {
-      const res = await fetchWithTimeout(proxy, { method: "HEAD" }, 7000);
+      const res = await fetchWithTimeout(proxy, { method: "GET" }, 7000);
+
+      console.log(`[PROXY] ${proxy} -> ${res.status}`);
 
       if (res.ok) {
         return proxy;
       }
-    } catch {
-      console.error(`[PROXY] ${proxy} failed`);
+    } catch (error) {
+      console.error(`[PROXY] ${proxy} failed:`, error);
     }
   }
 
   return null;
 }
-
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.114 Safari/537.36";
 
