@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 
 const execFileAsync = promisify(execFile);
 
-const CACHE_DIR = path.join(process.cwd(), "cache");
+const CACHE_DIR = "/home/deploy/cache";
 
 const SEGMENT_PROXY = "https://odd-wind-9c3b.expired2.workers.dev/?url=";
 // const SEGMENT_PROXY = "https://dark-cherry-6a91.onion1-15b.workers.dev/?url=";
