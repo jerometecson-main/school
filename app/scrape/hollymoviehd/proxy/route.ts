@@ -6,6 +6,7 @@ import { promisify } from "util";
 import { createHash } from "crypto";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
+import { fetchWithTimeout } from "@/lib/fetch-timeout";
 
 export const runtime = "nodejs";
 
@@ -13,12 +14,35 @@ const execFileAsync = promisify(execFile);
 
 const CACHE_DIR = "/home/deploy/cache";
 
-// const SEGMENT_PROXY = "https://odd-wind-9c3b.expired2.workers.dev/?url=";
-// const SEGMENT_PROXY = "https://dark-cherry-6a91.onion1-15b.workers.dev/?url=";
-// https: const SEGMENT_PROXY = "https://segment.expired1.workers.dev/?url=";
-const SEGMENT_PROXY = "https://dawn-surf-3fd4.cabbag16.workers.dev/?url=";
-//  "",
-// "https://rapid-mountain-88b5.cabbage17.workers.dev/",
+const SEGMENT_PROXIES = [
+  "https://rapid-mountain-88b5.cabbage17.workers.dev/",
+  "https://segment.expired1.workers.dev/",
+  "https://dawn-surf-3fd4.cabbag16.workers.dev/",
+  "https://dark-cherry-6a91.onion1-15b.workers.dev/",
+  "https://odd-wind-9c3b.expired2.workers.dev/",
+];
+
+function shuffle<T>(array: T[]) {
+  return [...array].sort(() => Math.random() - 0.5);
+}
+
+async function findProxy(proxies: string[]) {
+  if (!proxies.length) return null;
+  const shuffled = shuffle(proxies);
+  for (const proxy of shuffled) {
+    try {
+      const res = await fetchWithTimeout(proxy, { method: "HEAD" }, 7000);
+
+      if (res.ok) {
+        return proxy;
+      }
+    } catch {
+      console.error(`[PROXY] ${proxy} failed`);
+    }
+  }
+
+  return null;
+}
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.114 Safari/537.36";
@@ -295,6 +319,13 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    const segmentProxy = await findProxy(SEGMENT_PROXIES);
+    if (!segmentProxy) {
+      return new Response("No segment proxy available", {
+        status: 502,
+        headers: CORS_HEADERS,
+      });
+    }
     /*
      * --------------------------------------------------
      * REWRITE PLAYLIST
@@ -333,7 +364,7 @@ export async function GET(req: NextRequest) {
         /*
          * Actual media segment.
          */
-        return SEGMENT_PROXY + encodeURIComponent(absoluteUrl.toString());
+        return `${segmentProxy}?url=${encodeURIComponent(absoluteUrl.toString())}`;
       })
       .join("\n");
 
