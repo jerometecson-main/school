@@ -13,8 +13,9 @@ const execFileAsync = promisify(execFile);
 
 const CACHE_DIR = path.join(process.cwd(), "cache");
 
+const SEGMENT_PROXY = "https://odd-wind-9c3b.expired2.workers.dev/?url=";
 // const SEGMENT_PROXY = "https://dark-cherry-6a91.onion1-15b.workers.dev/?url=";
-const SEGMENT_PROXY = "https://segment.expired1.workers.dev/?url=";
+// https: const SEGMENT_PROXY = "https://segment.expired1.workers.dev/?url=";
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.114 Safari/537.36";
