@@ -13,9 +13,12 @@ const execFileAsync = promisify(execFile);
 
 const CACHE_DIR = "/home/deploy/cache";
 
-const SEGMENT_PROXY = "https://odd-wind-9c3b.expired2.workers.dev/?url=";
+// const SEGMENT_PROXY = "https://odd-wind-9c3b.expired2.workers.dev/?url=";
 // const SEGMENT_PROXY = "https://dark-cherry-6a91.onion1-15b.workers.dev/?url=";
 // https: const SEGMENT_PROXY = "https://segment.expired1.workers.dev/?url=";
+const SEGMENT_PROXY = "https://dawn-surf-3fd4.cabbag16.workers.dev/?url=";
+//  "",
+// "https://rapid-mountain-88b5.cabbage17.workers.dev/",
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.114 Safari/537.36";
