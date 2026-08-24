@@ -148,10 +148,11 @@ export async function GET(req: NextRequest) {
     });
 
     const data = (await response.json()) as PlayResponse;
-
+    const proxyIP = await getProxyIP();
     if (type === "dash") {
       return NextResponse.json({
         source: source.name,
+        ip: proxyIP,
         data: data.data?.dash ?? [],
       });
     }
@@ -159,12 +160,14 @@ export async function GET(req: NextRequest) {
     if (type === "mp4") {
       return NextResponse.json({
         source: source.name,
+        ip: proxyIP,
         data: data.data?.streams ?? [],
       });
     }
 
     return NextResponse.json({
       source: source.name,
+      ip: proxyIP,
       ...data,
     });
   } catch (error) {
@@ -180,5 +183,18 @@ export async function GET(req: NextRequest) {
       },
       { status: 502 },
     );
+  }
+}
+async function getProxyIP(): Promise<string | null> {
+  try {
+    const response = await fetch("https://api.ipify.org?format=json", {
+      dispatcher: residentialProxy,
+    });
+
+    const data = (await response.json()) as { ip?: string };
+
+    return data.ip ?? null;
+  } catch {
+    return null;
   }
 }
