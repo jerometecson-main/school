@@ -1,3 +1,4 @@
+import { getRandomAfricanIP } from "@/lib/african-ip";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(req: NextRequest) {
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
   ];
 
   const userAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
-
+  const randomIP = getRandomAfricanIP();
   const sources = [
     {
       name: "123movies",
@@ -128,7 +129,11 @@ export async function GET(req: NextRequest) {
       "accept-language": "en-US,en;q=0.7",
       referer: source.referer,
       "user-agent": userAgent,
-      "x-client-info": '{"timezone":"Asia/Manila"}',
+      "X-Client-Info": '{"timezone":"Africa/Nairobi"}',
+      "X-Forwarded-For": randomIP,
+      "CF-Connecting-IP": randomIP,
+      "X-Real-IP": randomIP,
+
       "x-source": "",
     },
     cache: "no-store",
