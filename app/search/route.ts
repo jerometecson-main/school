@@ -2,12 +2,13 @@
 import { fetchWithTimeout } from "@/lib/fetch-timeout";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { getRandomAfricanIP } from "@/lib/african-ip";
 
 const supabase = createClient(
   process.env.SUPABASE_URL_MOVIEBOX_WEB!,
   process.env.SUPABASE_SERVICE_ROLE_KEY_MOVIEBOX_WEB!,
 );
+
+const SEARCH_WORKER = "https://cool-sea-3ac5.zxcprime360.workers.dev/";
 
 export async function GET(req: NextRequest) {
   try {
@@ -38,97 +39,68 @@ export async function GET(req: NextRequest) {
         dubs: cached.dubs ?? [],
       });
     }
-    const randomIP = getRandomAfricanIP();
 
-    const searchRes = await fetchWithTimeout(
-      `https://h5-api.aoneroom.com/wefeed-h5api-bff/subject/search`,
-      {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization:
-            "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjM1Nzg2MTcyNzAwNDQwOTI5ODQsImF0cCI6MywiZXh0IjoiMTc4NjgxNDE3OSIsImV4cCI6MTc5NDU5MDE3OSwiaWF0IjoxNzg2ODEzODc5fQ.rptVA52qlQg30CeFcxQN15MGdNsNtp2u8wnt4n6oCZA",
-          Origin: "https://movieboxhd.net",
-          Referer: "https://movieboxhd.net/",
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
-          "X-Client-Info": '{"timezone":"Africa/Nairobi"}',
-          "X-Forwarded-For": randomIP,
-          "CF-Connecting-IP": randomIP,
-          "X-Real-IP": randomIP,
-          "X-No-High-Risk-Restrict": "0",
-          "X-Request-Lang": "en",
-          "X-Vip-Restrict": "1",
-        },
-        body: JSON.stringify({
-          keyword: `${title}`,
-          page: 1,
-          perPage: 24,
-          subjectType: mediaType === "tv" ? 2 : 1,
-        }),
-      },
-      8000,
-    );
+    // -------- Search Worker --------
+    const searchUrl = new URL(SEARCH_WORKER);
+    searchUrl.searchParams.set("query", title);
 
-    const searchJson = await searchRes.json();
-    const results = searchJson?.data?.data || searchJson?.data || searchJson;
-    const items = results?.items || [];
+    const searchRes = await fetchWithTimeout(searchUrl.toString(), {}, 8000);
 
-    if (!items.length) {
+    if (!searchRes.ok) {
+      return NextResponse.json(
+        { success: false, error: "Search failed" },
+        { status: 502 },
+      );
+    }
+
+    const items = await searchRes.json();
+
+    if (!Array.isArray(items) || !items.length) {
       return NextResponse.json(
         { success: false, error: "No search results" },
         { status: 404 },
       );
     }
 
-    const normalizedTitle = title?.toLowerCase().trim().replace(/-/g, " ");
+    // -------- Match Result --------
+    const normalizedTitle = title.toLowerCase().trim().replace(/-/g, " ");
+
     const LANG_TAGS =
       /\[(tagalog|hindi|dubbed|multi|spanish|french|arabic|korean|japanese|tamil|telugu)\]/i;
-    const queryWords = normalizedTitle!.split(/\s+/).filter(Boolean);
-    const dateObj = date ? new Date(date) : null;
+
+    const queryWords = normalizedTitle.split(/\s+/).filter(Boolean);
+    const dateObj = new Date(date);
 
     let selectedItem = items.find((item: any) => {
       const itemTitle = item.title?.toLowerCase().replace(/-/g, " ") || "";
-      const itemReleaseDate = item.releaseDate;
+
       if (LANG_TAGS.test(itemTitle)) return false;
-      if (!dateObj || !itemReleaseDate) return false;
-      const itemDate = new Date(itemReleaseDate);
+      if (!item.releaseDate) return false;
+
+      const itemDate = new Date(item.releaseDate);
+
       const diff =
         itemDate.getFullYear() * 12 +
         itemDate.getMonth() -
         (dateObj.getFullYear() * 12 + dateObj.getMonth());
+
       if (Math.abs(diff) > 1) return false;
+
+      if (item.mediaType !== mediaType) return false;
+
       const itemTitleClean = itemTitle.replace(/\bs\d+(-s\d+)?\b/gi, "").trim();
+
       const itemWordsClean = itemTitleClean.split(/\s+/).filter(Boolean);
-      if (queryWords.length <= 2 && itemWordsClean.length !== queryWords.length)
+
+      if (
+        queryWords.length <= 2 &&
+        itemWordsClean.length !== queryWords.length
+      ) {
         return false;
+      }
+
       return queryWords.every((word) => itemTitle.includes(word));
     });
-
-    if (!selectedItem) {
-      selectedItem = items.find((item: any) => {
-        const itemTitle = item.title?.toLowerCase().replace(/-/g, " ") || "";
-        const itemReleaseDate = item.releaseDate;
-        if (!dateObj || !itemReleaseDate) return false;
-        const itemDate = new Date(itemReleaseDate);
-        const diff =
-          itemDate.getFullYear() * 12 +
-          itemDate.getMonth() -
-          (dateObj.getFullYear() * 12 + dateObj.getMonth());
-        if (Math.abs(diff) > 1) return false;
-        const itemTitleClean = itemTitle
-          .replace(/\bs\d+(-s\d+)?\b/gi, "")
-          .trim();
-        const itemWordsClean = itemTitleClean.split(/\s+/).filter(Boolean);
-        if (
-          queryWords.length <= 2 &&
-          itemWordsClean.length !== queryWords.length
-        )
-          return false;
-        return queryWords.every((word) => itemTitle.includes(word));
-      });
-    }
 
     if (!selectedItem) {
       return NextResponse.json(
@@ -137,7 +109,8 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const rawSubjectId = selectedItem?.subjectId;
+    const rawSubjectId = selectedItem.subjectId;
+
     if (!rawSubjectId) {
       return NextResponse.json(
         { success: false, error: "SubjectId Not Found" },
@@ -156,22 +129,15 @@ export async function GET(req: NextRequest) {
           Referer: "https://netfilm.world/",
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
-
-          "X-Client-Info": '{"timezone":"Africa/Nairobi"}',
-          "X-Forwarded-For": randomIP,
-          "CF-Connecting-IP": randomIP,
-          "X-Real-IP": randomIP,
-
-          "X-No-High-Risk-Restrict": "0",
-          "X-Vip-Restrict": "1",
-          "X-watch-restrict": "0",
         },
       },
       8000,
     );
 
     const detailJson = await detailRes.json();
+
     const info = detailJson?.data?.data || detailJson?.data || detailJson;
+
     let dubs = info?.subject?.dubs || [];
 
     if (dubs.length === 0) {
@@ -188,7 +154,7 @@ export async function GET(req: NextRequest) {
       ];
     }
 
-    // -------- Save to Supabase only --------
+    // -------- Save to Supabase --------
     await supabase.from("moviebox_cache").upsert(
       {
         tmdb_id: tmdbId,
@@ -197,7 +163,10 @@ export async function GET(req: NextRequest) {
         release_date: date,
         title,
       },
-      { onConflict: "tmdb_id,media_type", ignoreDuplicates: true },
+      {
+        onConflict: "tmdb_id,media_type",
+        ignoreDuplicates: true,
+      },
     );
 
     return NextResponse.json({
@@ -205,7 +174,7 @@ export async function GET(req: NextRequest) {
       cached: false,
       dubs,
     });
-  } catch (err: any) {
+  } catch {
     return NextResponse.json(
       { success: false, error: "Internal server error" },
       { status: 500 },
