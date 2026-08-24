@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { encryptUrl } from "@/lib/encryptor";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_HOLLY_SUPABASE_URL_HOLLY!,
@@ -41,15 +42,19 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const links = cached.sources
-      .filter((s: any) => s.file?.includes("/pl/"))
-      .map((source: any) => ({
-        source: "pl",
-        type: "hls",
-        link: `${domain}/scrape/hollymoviehd/proxy?url=${encodeURIComponent(
-          source.file,
-        )}`,
-      }));
+    const links = await Promise.all(
+      cached.sources
+        .filter((s: any) => s.file?.includes("/pl/"))
+        .map(async (source: any) => {
+          const encrypted = await encryptUrl(source.file);
+
+          return {
+            source: "pl",
+            type: "hls",
+            link: `${domain}/scrape/hollymoviehd/proxy?data=${encrypted}`,
+          };
+        }),
+    );
 
     if (!links.length) {
       return NextResponse.json(

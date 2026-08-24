@@ -6,7 +6,7 @@ import { promisify } from "util";
 import { createHash } from "crypto";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
-import { encryptUrl } from "@/lib/encryptor";
+import { decryptUrl, encryptUrl } from "@/lib/encryptor";
 import { fetchWithTimeout } from "@/lib/fetch-timeout";
 
 export const runtime = "nodejs";
@@ -84,16 +84,17 @@ const CORS_HEADERS = {
 };
 
 export async function GET(req: NextRequest) {
-  const url = req.nextUrl.searchParams.get("url");
+  const data = req.nextUrl.searchParams.get("data");
 
-  if (!url) {
-    return new Response("Missing url", {
+  if (!data) {
+    return new Response("Missing data", {
       status: 400,
       headers: CORS_HEADERS,
     });
   }
 
   try {
+    const url = await decryptUrl(data);
     const target = new URL(url);
 
     if (
