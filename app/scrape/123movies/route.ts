@@ -1,3 +1,4 @@
+import { getRandomPLDTIP } from "@/lib/pldt-ips";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(req: NextRequest) {
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
   ];
 
   const userAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
-
+  const randomIP = getRandomPLDTIP();
   const sources = [
     {
       name: "123movies",
@@ -129,6 +130,9 @@ export async function GET(req: NextRequest) {
       referer: source.referer,
       "user-agent": userAgent,
       "x-client-info": '{"timezone":"Asia/Manila"}',
+      "X-Forwarded-For": randomIP,
+      "CF-Connecting-IP": randomIP,
+      "X-Real-IP": randomIP,
       "x-source": "",
     },
     cache: "no-store",
