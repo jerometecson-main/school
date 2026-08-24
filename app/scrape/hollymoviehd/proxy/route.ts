@@ -355,7 +355,6 @@ export async function GET(req: NextRequest) {
      * REWRITE PLAYLIST
      * --------------------------------------------------
      */
-
     const rewritten = await Promise.all(
       playlist.split(/\r?\n/).map(async (line) => {
         const value = line.trim();
@@ -372,15 +371,17 @@ export async function GET(req: NextRequest) {
           return line;
         }
 
+        // Nested master playlist
         if (
           absoluteUrl.hostname === "goodstream.cc" &&
           absoluteUrl.pathname.startsWith("/pl/")
         ) {
-          return `/scrape/hollymoviehd/proxy?url=${encodeURIComponent(
-            absoluteUrl.toString(),
-          )}`;
+          const encrypted = await encryptUrl(absoluteUrl.toString());
+
+          return `/scrape/hollymoviehd/proxy?data=${encrypted}`;
         }
 
+        // Media segment
         const encrypted = await encryptUrl(absoluteUrl.toString());
 
         return `${segmentProxy}?data=${encrypted}`;
