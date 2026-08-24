@@ -1,5 +1,15 @@
-import { getRandomPLDTIP } from "@/lib/pldt-ips";
 import { NextRequest, NextResponse } from "next/server";
+import { fetch, ProxyAgent } from "undici";
+
+interface PlayResponse {
+  data?: {
+    dash?: unknown[];
+    streams?: unknown[];
+  };
+  [key: string]: unknown;
+}
+
+const residentialProxy = new ProxyAgent(process.env.RESIDENTIAL_PROXY!);
 
 export async function GET(req: NextRequest) {
   const subjectId = req.nextUrl.searchParams.get("subjectId");
@@ -7,14 +17,15 @@ export async function GET(req: NextRequest) {
   const season = req.nextUrl.searchParams.get("se") || "0";
   const episode = req.nextUrl.searchParams.get("ep") || "0";
   const type = req.nextUrl.searchParams.get("type");
-
   const streamSignType = req.nextUrl.searchParams.get("streamSignType");
+
   if (!subjectId || !detailPath) {
     return NextResponse.json(
       { error: "subjectId and detailPath are required" },
       { status: 400 },
     );
   }
+
   if (
     streamSignType !== null &&
     streamSignType !== "0" &&
@@ -25,6 +36,7 @@ export async function GET(req: NextRequest) {
       { status: 400 },
     );
   }
+
   const userAgents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
@@ -33,7 +45,7 @@ export async function GET(req: NextRequest) {
   ];
 
   const userAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
-  const randomIP = getRandomPLDTIP();
+
   const sources = [
     {
       name: "123movies",
@@ -73,14 +85,13 @@ export async function GET(req: NextRequest) {
     {
       name: "moviebix",
       host: "moviebix.org",
-      referer: `https://moviebix.org/moviesPage/${detailPath}?id=${subjectId}&type=/movie/detail&detailSe=&detailEp=&lang=en`,
+      referer: `https://moviebix.org/moviesPage/${detailPath}?id=${subjectId}&type=/movie/detail`,
     },
     {
       name: "movibox",
       host: "movibox.xyz",
       referer: `https://movibox.xyz/watch/${detailPath}`,
     },
-
     {
       name: "movieboxonlinewatch",
       host: "movieboxonlinewatch.com",
@@ -123,39 +134,51 @@ export async function GET(req: NextRequest) {
 
   const url = `https://${source.host}/wefeed-h5api-bff/subject/play?${params.toString()}`;
 
-  const response = await fetch(url, {
-    headers: {
-      accept: "application/json",
-      "accept-language": "en-US,en;q=0.7",
-      referer: source.referer,
-      "user-agent": userAgent,
-      "x-client-info": '{"timezone":"Asia/Manila"}',
-      "X-Forwarded-For": randomIP,
-      "CF-Connecting-IP": randomIP,
-      "X-Real-IP": randomIP,
-      "x-source": "",
-    },
-    cache: "no-store",
-  });
+  try {
+    const response = await fetch(url, {
+      dispatcher: residentialProxy,
+      headers: {
+        accept: "application/json",
+        "accept-language": "en-US,en;q=0.7",
+        referer: source.referer,
+        "user-agent": userAgent,
+        "x-client-info": '{"timezone":"Asia/Manila"}',
+        "x-source": "",
+      },
+    });
 
-  const data = await response.json();
+    const data = (await response.json()) as PlayResponse;
 
-  if (type === "dash") {
+    if (type === "dash") {
+      return NextResponse.json({
+        source: source.name,
+        data: data.data?.dash ?? [],
+      });
+    }
+
+    if (type === "mp4") {
+      return NextResponse.json({
+        source: source.name,
+        data: data.data?.streams ?? [],
+      });
+    }
+
     return NextResponse.json({
       source: source.name,
-      data: data.data?.dash ?? [],
+      ...data,
     });
-  }
+  } catch (error) {
+    console.error(
+      `[SCRAPE] ${source.name} failed:`,
+      error instanceof Error ? error.message : error,
+    );
 
-  if (type === "mp4") {
-    return NextResponse.json({
-      source: source.name,
-      data: data.data?.streams ?? [],
-    });
+    return NextResponse.json(
+      {
+        error: "Upstream request failed",
+        source: source.name,
+      },
+      { status: 502 },
+    );
   }
-
-  return NextResponse.json({
-    source: source.name,
-    ...data,
-  });
 }
