@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
           return {
             source: "pl",
             type: "hls",
-            link: `${domain}/scrape/hollymoviehd/proxy?data=${encrypted}`,
+            link: `${domain}/vendetta/proxy?data=${encrypted}`,
           };
         }),
     );

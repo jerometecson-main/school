@@ -378,7 +378,7 @@ export async function GET(req: NextRequest) {
         ) {
           const encrypted = await encryptUrl(absoluteUrl.toString());
 
-          return `/scrape/hollymoviehd/proxy?data=${encrypted}`;
+          return `/vendetta/proxy?data=${encrypted}`;
         }
 
         // Media segment
