@@ -148,11 +148,11 @@ export async function GET(req: NextRequest) {
     });
 
     const data = (await response.json()) as PlayResponse;
-    const proxyIP = await getProxyIP();
+    // const proxyIP = await getProxyIP();
     if (type === "dash") {
       return NextResponse.json({
         source: source.name,
-        ip: proxyIP,
+        // ip: proxyIP,
         data: data.data?.dash ?? [],
       });
     }
@@ -160,14 +160,14 @@ export async function GET(req: NextRequest) {
     if (type === "mp4") {
       return NextResponse.json({
         source: source.name,
-        ip: proxyIP,
+        // ip: proxyIP,
         data: data.data?.streams ?? [],
       });
     }
 
     return NextResponse.json({
       source: source.name,
-      ip: proxyIP,
+      // ip: proxyIP,
       ...data,
     });
   } catch (error) {
@@ -185,16 +185,16 @@ export async function GET(req: NextRequest) {
     );
   }
 }
-async function getProxyIP(): Promise<string | null> {
-  try {
-    const response = await fetch("https://api.ipify.org?format=json", {
-      dispatcher: residentialProxy,
-    });
+// async function getProxyIP(): Promise<string | null> {
+//   try {
+//     const response = await fetch("https://api.ipify.org?format=json", {
+//       dispatcher: residentialProxy,
+//     });
 
-    const data = (await response.json()) as { ip?: string };
+//     const data = (await response.json()) as { ip?: string };
 
-    return data.ip ?? null;
-  } catch {
-    return null;
-  }
-}
+//     return data.ip ?? null;
+//   } catch {
+//     return null;
+//   }
+// }
