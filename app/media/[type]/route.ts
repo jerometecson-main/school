@@ -6,78 +6,78 @@ export async function GET(
   { params }: { params: Promise<{ type: string }> },
 ) {
   const { type } = await params;
+  const requestUrl = new URL(request.url);
 
-  const url = new URL(request.url);
+  const urlParam = requestUrl.searchParams.get("url");
+  const headerParam = requestUrl.searchParams.get("header");
 
-  let target = url.searchParams.get("url");
-  const headerParam = url.searchParams.get("header");
-
-  if (!target) {
+  if (!urlParam) {
     return new Response("Missing url", { status: 400 });
   }
 
-  if (type === "mp4" || type === "segment") {
-    try {
-      target = await decryptUrl(target);
-    } catch {
-      return new Response("Invalid url", { status: 400 });
+  let target = urlParam;
+
+  try {
+    if (type === "mp4" || type === "segment") {
+      target = await decryptUrl(urlParam);
     }
+  } catch {
+    return new Response("Invalid url", { status: 400 });
   }
 
   let headers: Record<string, string> = {};
 
-  try {
-    if (headerParam) {
+  if (headerParam) {
+    try {
       headers = JSON.parse(await decryptUrl(headerParam));
+    } catch {
+      return new Response("Invalid headers", { status: 400 });
     }
-  } catch {
-    return new Response("Invalid headers", { status: 400 });
   }
 
-  const range = request.headers.get("Range");
+  if (type === "mp4" || type === "segment") {
+    const range = request.headers.get("Range");
 
-  if (range && (type === "mp4" || type === "segment")) {
-    headers.Range = range;
+    if (range) {
+      headers.Range = range;
+    }
   }
 
-  const res = await fetch(target, {
-    headers,
-  });
+  const response = await fetch(target, { headers });
 
-  if (res.status === 429) {
+  if (response.status === 429) {
     return new Response("Upstream rate limited", {
       status: 429,
       headers: {
         "Access-Control-Allow-Origin": "*",
-        "Retry-After": res.headers.get("Retry-After") || "10",
+        "Retry-After": response.headers.get("Retry-After") || "10",
       },
     });
   }
 
-  // M3U8
   if (type === "m3u8") {
-    const text = await res.text();
-    const base = new URL(target);
+    const playlist = await response.text();
+    const baseUrl = new URL(target);
 
-    const playlist = (
+    const rewritten = (
       await Promise.all(
-        text.split("\n").map(async (line) => {
+        playlist.split("\n").map(async (line) => {
           if (!line || line.startsWith("#")) {
             return line;
           }
 
-          const segment = new URL(line, base).toString();
-          const encrypted = await encryptUrl(segment);
+          const segmentUrl = new URL(line, baseUrl).toString();
+          const encryptedUrl = await encryptUrl(segmentUrl);
 
-          return `${url.origin}/api/media/segment?url=${encodeURIComponent(
-            encrypted,
+          return `${requestUrl.origin}/api/media/segment?url=${encodeURIComponent(
+            encryptedUrl,
           )}&header=${encodeURIComponent(headerParam || "")}`;
         }),
       )
     ).join("\n");
 
-    return new Response(playlist, {
-      status: res.status,
+    return new Response(rewritten, {
+      status: response.status,
       headers: {
         "Content-Type": "application/vnd.apple.mpegurl",
         "Access-Control-Allow-Origin": "*",
@@ -85,28 +85,15 @@ export async function GET(
     });
   }
 
-  // MP4
-  if (type === "mp4") {
-    return new Response(res.body, {
-      status: res.status,
+  if (type === "mp4" || type === "segment") {
+    return new Response(response.body, {
+      status: response.status,
       headers: {
-        "Content-Type": res.headers.get("Content-Type") || "video/mp4",
-        "Content-Length": res.headers.get("Content-Length") || "",
-        "Content-Range": res.headers.get("Content-Range") || "",
-        "Accept-Ranges": "bytes",
-        "Access-Control-Allow-Origin": "*",
-      },
-    });
-  }
-
-  // Segment
-  if (type === "segment") {
-    return new Response(res.body, {
-      status: res.status,
-      headers: {
-        "Content-Type": res.headers.get("Content-Type") || "video/mp2t",
-        "Content-Length": res.headers.get("Content-Length") || "",
-        "Content-Range": res.headers.get("Content-Range") || "",
+        "Content-Type":
+          response.headers.get("Content-Type") ||
+          (type === "mp4" ? "video/mp4" : "video/mp2t"),
+        "Content-Length": response.headers.get("Content-Length") || "",
+        "Content-Range": response.headers.get("Content-Range") || "",
         "Accept-Ranges": "bytes",
         "Access-Control-Allow-Origin": "*",
       },
