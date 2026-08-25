@@ -10,14 +10,13 @@ export async function GET(
   const url = new URL(request.url);
 
   let target = url.searchParams.get("url");
-  const headerParam = url.searchParams.get("headers");
+  const headerParam = url.searchParams.get("header");
 
   if (!target) {
     return new Response("Missing url", { status: 400 });
   }
 
-  // Segment URLs are encrypted
-  if (type === "segment") {
+  if (type === "mp4" || type === "segment") {
     try {
       target = await decryptUrl(target);
     } catch {
@@ -28,7 +27,9 @@ export async function GET(
   let headers: Record<string, string> = {};
 
   try {
-    headers = headerParam ? JSON.parse(headerParam) : {};
+    if (headerParam) {
+      headers = JSON.parse(await decryptUrl(headerParam));
+    }
   } catch {
     return new Response("Invalid headers", { status: 400 });
   }
@@ -66,13 +67,11 @@ export async function GET(
           }
 
           const segment = new URL(line, base).toString();
-
-          // Encrypt the real segment URL
           const encrypted = await encryptUrl(segment);
 
           return `${url.origin}/api/media/segment?url=${encodeURIComponent(
             encrypted,
-          )}&headers=${encodeURIComponent(headerParam || "")}`;
+          )}&header=${encodeURIComponent(headerParam || "")}`;
         }),
       )
     ).join("\n");
