@@ -1,12 +1,7 @@
-// ICARUS SERVER – search + cache only
+// ICARUS SERVER – MovieBox search only
+
 import { fetchWithTimeout } from "@/lib/fetch-timeout";
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.SUPABASE_URL_MOVIEBOX_WEB!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY_MOVIEBOX_WEB!,
-);
 
 const SEARCH_WORKER = "https://cool-sea-3ac5.zxcprime360.workers.dev/";
 
@@ -20,27 +15,14 @@ export async function GET(req: NextRequest) {
     if (!tmdbId || !mediaType || !title || !date) {
       return NextResponse.json(
         { success: false, error: "missing params" },
-        { status: 404 },
+        { status: 400 },
       );
     }
 
-    // -------- Cache Lookup --------
-    const { data: cached } = await supabase
-      .from("moviebox_cache")
-      .select("dubs")
-      .eq("tmdb_id", tmdbId)
-      .eq("media_type", mediaType)
-      .maybeSingle();
+    // -----------------------------
+    // Search Worker
+    // -----------------------------
 
-    if (cached) {
-      return NextResponse.json({
-        success: true,
-        cached: true,
-        dubs: cached.dubs ?? [],
-      });
-    }
-
-    // -------- Search Worker --------
     const searchUrl = new URL(SEARCH_WORKER);
     searchUrl.searchParams.set("query", title);
 
@@ -62,7 +44,10 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // -------- Match Result --------
+    // -----------------------------
+    // Match Result
+    // -----------------------------
+
     const normalizedTitle = title.toLowerCase().trim().replace(/-/g, " ");
 
     const LANG_TAGS =
@@ -71,7 +56,7 @@ export async function GET(req: NextRequest) {
     const queryWords = normalizedTitle.split(/\s+/).filter(Boolean);
     const dateObj = new Date(date);
 
-    let selectedItem = items.find((item: any) => {
+    const selectedItem = items.find((item: any) => {
       const itemTitle = item.title?.toLowerCase().replace(/-/g, " ") || "";
 
       if (LANG_TAGS.test(itemTitle)) return false;
@@ -118,7 +103,10 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // -------- Detail (to get dubs) --------
+    // -----------------------------
+    // Detail → Get Dubs
+    // -----------------------------
+
     const detailRes = await fetchWithTimeout(
       `https://h5-api.aoneroom.com/wefeed-h5api-bff/detail?detailPath=${selectedItem.detailPath}`,
       {
@@ -134,13 +122,24 @@ export async function GET(req: NextRequest) {
       8000,
     );
 
+    if (!detailRes.ok) {
+      return NextResponse.json(
+        { success: false, error: "Detail request failed" },
+        { status: 502 },
+      );
+    }
+
     const detailJson = await detailRes.json();
 
     const info = detailJson?.data?.data || detailJson?.data || detailJson;
 
     let dubs = info?.subject?.dubs || [];
 
-    if (dubs.length === 0) {
+    // -----------------------------
+    // No dubs → construct original
+    // -----------------------------
+
+    if (!dubs.length) {
       dubs = [
         {
           subjectId: rawSubjectId,
@@ -154,24 +153,12 @@ export async function GET(req: NextRequest) {
       ];
     }
 
-    // -------- Save to Supabase --------
-    await supabase.from("moviebox_cache").upsert(
-      {
-        tmdb_id: tmdbId,
-        media_type: mediaType,
-        dubs,
-        release_date: date,
-        title,
-      },
-      {
-        onConflict: "tmdb_id,media_type",
-        ignoreDuplicates: true,
-      },
-    );
+    // -----------------------------
+    // Return
+    // -----------------------------
 
     return NextResponse.json({
       success: true,
-      cached: false,
       dubs,
     });
   } catch {
