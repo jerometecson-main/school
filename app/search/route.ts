@@ -1,5 +1,3 @@
-// ICARUS SERVER – MovieBox search only
-
 import { fetchWithTimeout } from "@/lib/fetch-timeout";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -56,8 +54,10 @@ export async function GET(req: NextRequest) {
 
     const queryWords = normalizedTitle.split(/\s+/).filter(Boolean);
 
-    const datesToTry =
-      mediaType === "tv" && latestDate ? [date, latestDate] : [date];
+    const dateObj = new Date(date);
+
+    const latestDateObj =
+      mediaType === "tv" && latestDate ? new Date(latestDate) : null;
 
     const selectedItem = items.find((item: any) => {
       const itemTitle = item.title?.toLowerCase().replace(/-/g, " ") || "";
@@ -72,16 +72,54 @@ export async function GET(req: NextRequest) {
 
       const itemDate = new Date(item.releaseDate);
 
-      const matchesDate = datesToTry.some((matchDate) => {
-        const dateObj = new Date(matchDate);
+      // Invalid dates
+      if (Number.isNaN(itemDate.getTime())) return false;
 
+      let matchesDate = false;
+
+      // Movies:
+      // Match release date within ±1 month.
+      if (mediaType !== "tv") {
         const diff =
           itemDate.getFullYear() * 12 +
           itemDate.getMonth() -
           (dateObj.getFullYear() * 12 + dateObj.getMonth());
 
-        return Math.abs(diff) <= 1;
-      });
+        matchesDate = Math.abs(diff) <= 1;
+      }
+
+      // TV:
+      // MovieBox may use:
+      // - first air date
+      // - season release date
+      // - another date somewhere during the show's run
+      else {
+        const diffFromFirst =
+          itemDate.getFullYear() * 12 +
+          itemDate.getMonth() -
+          (dateObj.getFullYear() * 12 + dateObj.getMonth());
+
+        const matchesFirstDate = Math.abs(diffFromFirst) <= 1;
+
+        let matchesLatestDate = false;
+        let withinAirDateRange = false;
+
+        if (latestDateObj) {
+          const diffFromLatest =
+            itemDate.getFullYear() * 12 +
+            itemDate.getMonth() -
+            (latestDateObj.getFullYear() * 12 + latestDateObj.getMonth());
+
+          matchesLatestDate = Math.abs(diffFromLatest) <= 1;
+
+          // Accept dates anywhere between first air date
+          // and latest air date.
+          withinAirDateRange = itemDate >= dateObj && itemDate <= latestDateObj;
+        }
+
+        matchesDate =
+          matchesFirstDate || matchesLatestDate || withinAirDateRange;
+      }
 
       if (!matchesDate) return false;
 
