@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
         const segmentUrl = new URL(line, baseUrl).toString();
         const encryptedUrl = await encryptUrl(segmentUrl);
 
-        return `${requestUrl.origin}/media/hls/segment?file=${encodeURIComponent(
+        return `https://api1.zxcstream.xyz/media/hls/segment?file=${encodeURIComponent(
           encryptedUrl,
         )}&header=${encodeURIComponent(headerParam || "")}`;
       }),

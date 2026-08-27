@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const proxyBase = `${request.nextUrl.origin}/media/dash/segment`;
+  const proxyBase = `https://api1.zxcstream.xyz/media/dash/segment`;
 
   const query =
     `url=${encodeURIComponent(urlParam)}` +
