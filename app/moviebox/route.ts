@@ -11,6 +11,7 @@ interface PlayResponse {
 
 const residentialProxy = new ProxyAgent(process.env.RESIDENTIAL_PROXY!);
 const residentialProxy_2 = new ProxyAgent(process.env.RESIDENTIAL_PROXY_2!);
+
 const USER_AGENTS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",

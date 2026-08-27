@@ -113,12 +113,7 @@ export async function GET(request: NextRequest) {
         { status: 502 },
       );
     }
-
-    return NextResponse.json({
-      playlist: data.stream.playlist,
-      playlistHeaders: data.stream.playlistHeaders,
-      type: data.stream.type,
-    });
+    return NextResponse.json(data);
   } catch (err) {
     return NextResponse.json(
       {
