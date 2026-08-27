@@ -10,6 +10,7 @@ export async function GET(
 
   const urlParam = requestUrl.searchParams.get("url");
   const headerParam = requestUrl.searchParams.get("header");
+  const dashParam = requestUrl.searchParams.get("dash");
 
   if (!urlParam) {
     return new Response("Missing url", { status: 400 });
@@ -19,7 +20,11 @@ export async function GET(
 
   try {
     if (type === "mp4" || type === "segment" || type === "dash") {
-      target = await decryptUrl(urlParam);
+      if (type === "segment" && dashParam === "1") {
+        target = urlParam;
+      } else {
+        target = await decryptUrl(urlParam);
+      }
     }
   } catch {
     return new Response("Invalid url", { status: 400 });
@@ -35,7 +40,7 @@ export async function GET(
     }
   }
 
-  if (type === "mp4" || type === "segment" || type === "dash") {
+  if (type === "mp4" || type === "segment") {
     const range = request.headers.get("Range");
 
     if (range) {
@@ -85,28 +90,23 @@ export async function GET(
     });
   }
 
+  // DASH - SegmentTemplate only
   if (type === "dash") {
-    const mpd = await response.text();
+    let mpd = await response.text();
     const baseUrl = new URL(target);
 
-    const matches = [...mpd.matchAll(/(initialization|media)="([^"]+)"/g)];
+    mpd = mpd.replace(
+      /(media|initialization)="([^"]+)"/g,
+      (_, attribute, template) => {
+        const segmentUrl = new URL(template, baseUrl).toString();
 
-    let rewritten = mpd;
+        return `${attribute}="${requestUrl.origin}/api/media/segment?url=${encodeURIComponent(
+          segmentUrl,
+        )}&header=${encodeURIComponent(headerParam || "")}&dash=1"`;
+      },
+    );
 
-    for (const match of matches) {
-      const [full, attr, path] = match;
-
-      const segmentUrl = new URL(path, baseUrl).toString();
-      const encryptedUrl = await encryptUrl(segmentUrl);
-
-      const proxyUrl = `${requestUrl.origin}/api/media/dash?url=${encodeURIComponent(
-        encryptedUrl,
-      )}&header=${encodeURIComponent(headerParam || "")}`;
-
-      rewritten = rewritten.replace(full, `${attr}="${proxyUrl}"`);
-    }
-
-    return new Response(rewritten, {
+    return new Response(mpd, {
       status: response.status,
       headers: {
         "Content-Type": "application/dash+xml",
@@ -121,7 +121,7 @@ export async function GET(
       headers: {
         "Content-Type":
           response.headers.get("Content-Type") ||
-          (type === "mp4" ? "video/mp4" : "video/mp2t"),
+          (type === "mp4" ? "video/mp4" : "video/mp4"),
         "Content-Length": response.headers.get("Content-Length") || "",
         "Content-Range": response.headers.get("Content-Range") || "",
         "Accept-Ranges": "bytes",
@@ -132,7 +132,6 @@ export async function GET(
 
   return new Response("Not Found", { status: 404 });
 }
-
 // import { NextRequest } from "next/server";
 // import { encryptUrl, decryptUrl } from "@/lib/encryptor";
 
