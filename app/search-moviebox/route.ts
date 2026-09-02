@@ -35,6 +35,16 @@ export async function GET(req: NextRequest) {
     }
 
     const items = await searchRes.json();
+    console.error("SEARCH DEBUG", {
+      tmdbId,
+      mediaType,
+      title,
+      date,
+      itemCount: items?.length,
+      runner: items?.filter((item: any) =>
+        item.title?.toLowerCase().includes("runner"),
+      ),
+    });
 
     if (!Array.isArray(items) || !items.length) {
       return NextResponse.json(
