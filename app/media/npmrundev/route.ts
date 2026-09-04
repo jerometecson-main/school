@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
   }
 
   let mpd = await response.text();
-
+  mpd = mpd.replaceAll('codecs="hev1"', 'codecs="hev1.1.6.L93.90"');
   const cookie = headers.Cookie || headers.cookie || "";
   const params = new URLSearchParams();
 
