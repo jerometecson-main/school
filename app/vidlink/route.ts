@@ -4,29 +4,13 @@ import { fetch, ProxyAgent } from "undici";
 const ENC_DEC_API = "https://enc-dec.app/api";
 const VIDLINK_API = "https://vidlink.pro/api/b";
 
-const residentialProxy = new ProxyAgent(process.env.RESIDENTIAL_PROXY_2!);
+const residentialProxy = new ProxyAgent(process.env.RESIDENTIAL_PROXY!);
 
 const HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
   Origin: "https://vidlink.pro",
   Referer: "https://vidlink.pro/",
-};
-
-const VIDLINK_HEADERS = {
-  Accept: "*/*",
-  "Accept-Language": "en-US,en;q=0.7",
-  Referer: "https://vidlink.pro/movie/1184918",
-  "Sec-CH-UA": '"Not=A?Brand";v="99", "Brave";v="151", "Chromium";v="151"',
-  "Sec-CH-UA-Mobile": "?0",
-  "Sec-CH-UA-Platform": '"Windows"',
-  "Sec-Fetch-Dest": "empty",
-  "Sec-Fetch-Mode": "cors",
-  "Sec-Fetch-Site": "same-origin",
-  "Sec-GPC": "1",
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
-  "X-Playback-Environment": "dash-hevc",
 };
 
 export async function GET(request: NextRequest) {
@@ -45,6 +29,19 @@ export async function GET(request: NextRequest) {
       { status: 400 },
     );
   }
+
+  const VIDLINK_HEADERS = {
+    Accept: "*/*",
+    "Accept-Language": "en-US,en;q=0.7",
+    Origin: "https://vidlink.pro",
+    Referer:
+      mediaType === "movie"
+        ? `https://vidlink.pro/movie/${tmdbId}`
+        : `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`,
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+    "X-Playback-Environment": "dash-hevc",
+  };
 
   try {
     const encryptedResponse = await fetch(
